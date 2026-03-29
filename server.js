@@ -6,7 +6,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 
-// Health checks
+// Health check
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
@@ -15,31 +15,36 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Nova rota /run
+// Rota /run para automação
 app.post('/run', async (req, res) => {
   try {
+    console.log('Requisição recebida em /run:', req.body);
+    
     const { clientId, password, username, email, phone } = req.body;
     
-    // Aqui voc? implementa a l?gica do Playwright
-    console.log('Recebido:', { clientId, username, email, phone });
-    
+    // Inicia o navegador
     const browser = await chromium.launch();
     const page = await browser.newPage();
+    
+    // Exemplo: navegar para um site
     await page.goto('https://example.com');
     const title = await page.title();
+    
     await browser.close();
     
     res.json({ 
       success: true, 
       message: 'Executado com sucesso',
-      data: { title, received: { clientId, username, email, phone } }
+      title: title,
+      received: { clientId, username, email, phone }
     });
   } catch (error) {
+    console.error('Erro:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Rota original de scrape
+// Rota original
 app.post('/api/scrape', async (req, res) => {
   const { url } = req.body;
   if (!url) {
