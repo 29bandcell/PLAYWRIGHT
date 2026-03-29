@@ -1,35 +1,31 @@
 const express = require('express');
-const { chromium } = require('playwright');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-const PORT = process.env.PORT || 3001;
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/', (req, res) => {
+  res.send('Playwright API rodando');
 });
 
-app.post('/api/scrape', async (req, res) => {
-  const { url } = req.body;
-  
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
-  
-  try {
-    const browser = await chromium.launch();
-    const page = await browser.newPage();
-    await page.goto(url);
-    const title = await page.title();
-    await browser.close();
-    
-    res.json({ title, url });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+app.get('/health', (req, res) => {
+  res.status(200).json({ ok: true, service: 'playwright-api' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Playwright API running on port ${PORT}`);
+app.post('/run', async (req, res) => {
+  return res.status(200).json({
+    ok: true,
+    status: 'ok',
+    recebido: req.body
+  });
+});
+
+const PORT = Number(process.env.PORT || 3001);
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('Playwright API running on port ' + PORT);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Recebido SIGTERM, encerrando com segurança...');
+  server.close(() => process.exit(0));
 });
