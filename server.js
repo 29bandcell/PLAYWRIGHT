@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => {
-  res.send('Playwright API rodando');
+  res.status(200).send('Playwright API rodando');
 });
 
 app.get('/health', (req, res) => {
