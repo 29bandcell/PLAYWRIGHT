@@ -50,7 +50,7 @@ async function startBrowser() {
 }
 
 async function ensureLoggedIn(page) {
-  await page.goto(`${BASE_URL}`, {
+  await page.goto(BASE_URL, {
     waitUntil: 'domcontentloaded',
     timeout: 60000
   });
@@ -99,52 +99,39 @@ app.post('/renovar', async (req, res) => {
 
     await ensureLoggedIn(page);
 
-    // Ajuste esta URL se a tela de clientes tiver rota específica
-    await page.goto(`${BASE_URL}`, {
+    await page.goto('https://dashboardcloud.net/iptv/clients', {
       waitUntil: 'domcontentloaded',
       timeout: 60000
     });
 
     await page.waitForTimeout(3000);
 
-    // Tenta localizar o usuário na tela
-    // Se houver busca, preenche; se não houver, o locator abaixo ainda 
-pode achar a linha
-    const searchInput = page.locator('input[type="search"], 
-input[placeholder*="Buscar"], input[placeholder*="buscar"]').first();
+    const searchInput = page.locator('input[type="search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]').first();
     if (await searchInput.count()) {
       await searchInput.fill(usuario);
       await page.waitForTimeout(2000);
     }
 
-    // Linha do cliente
     const clientRow = page.locator(`tr:has-text("${usuario}")`).first();
     if (!(await clientRow.count())) {
       throw new Error(`Cliente não encontrado: ${usuario}`);
     }
 
-    // Botão de renovar na linha
-    // Ajuste fino se o painel usar outro seletor
-    const renewButton = clientRow.locator('button, a').filter({
-      has: page.locator('i, svg')
-    }).nth(0);
-
-    // Alternativas mais seguras caso exista texto ou tooltip
-    if (await clientRow.locator('button:has-text("Renovar"), 
-a:has-text("Renovar")').count()) {
-      await clientRow.locator('button:has-text("Renovar"), 
-a:has-text("Renovar")').first().click();
-    } else if (await clientRow.locator('[title*="Renovar"], 
-[aria-label*="Renovar"]').count()) {
-      await clientRow.locator('[title*="Renovar"], 
-[aria-label*="Renovar"]').first().click();
+    if (await clientRow.locator('button:has-text("Renovar"), a:has-text("Renovar")').count()) {
+      await clientRow.locator('button:has-text("Renovar"), a:has-text("Renovar")').first().click();
+    } else if (await clientRow.locator('[title*="Renovar"], [aria-label*="Renovar"]').count()) {
+      await clientRow.locator('[title*="Renovar"], [aria-label*="Renovar"]').first().click();
     } else {
-      await renewButton.click();
+      const actionButtons = clientRow.locator('button, a');
+      const count = await actionButtons.count();
+      if (count === 0) {
+        throw new Error('Nenhum botão de ação encontrado na linha do cliente');
+      }
+      await actionButtons.nth(0).click();
     }
 
     await page.waitForTimeout(1500);
 
-    // Modal de renovação
     const monthInput = page.locator('input[type="number"]').first();
     if (!(await monthInput.count())) {
       throw new Error('Campo de meses não encontrado na renovação');
@@ -153,9 +140,7 @@ a:has-text("Renovar")').first().click();
     await monthInput.fill(String(meses));
     await page.waitForTimeout(500);
 
-    // Confirmar
-    const confirmButton = page.locator('button:has-text("Confirmar"), 
-button:has-text("Salvar"), button:has-text("Renovar")').first();
+    const confirmButton = page.locator('button:has-text("Confirmar"), button:has-text("Salvar"), button:has-text("Renovar")').first();
     if (!(await confirmButton.count())) {
       throw new Error('Botão de confirmar renovação não encontrado');
     }
@@ -163,19 +148,15 @@ button:has-text("Salvar"), button:has-text("Renovar")').first();
     await confirmButton.click();
     await page.waitForTimeout(2500);
 
-    // Tenta detectar mensagem de sucesso
-    const bodyText = await page.locator('body').innerText().catch(() => 
-'');
-    const sucessoDetectado = 
-/sucesso|renovado|atualizado|confirmado/i.test(bodyText);
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const sucessoDetectado = /sucesso|renovado|atualizado|confirmado/i.test(bodyText);
 
     await context.close();
     await browser.close();
 
     return res.json({
       success: true,
-      message: sucessoDetectado ? 'Renovação concluída' : 'Renovação 
-enviada',
+      message: sucessoDetectado ? 'Renovação concluída' : 'Renovação enviada',
       usuario,
       meses
     });
@@ -183,6 +164,7 @@ enviada',
     try {
       if (context) await context.close();
     } catch {}
+
     try {
       if (browser) await browser.close();
     } catch {}
