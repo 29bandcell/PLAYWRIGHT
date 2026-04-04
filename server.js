@@ -132,9 +132,8 @@ app.post('/renovar', async (req, res) => {
 
     await page.waitForTimeout(1500);
 
-    const monthInput = page.locator('input[type="number"]').first();
-    if (!(await monthInput.count())) {
-      throw new Error('Campo de meses não encontrado na renovação');
+    // pula campo de meses (já vem como 1 por padrão)
+await page.waitForTimeout(1000);
     }
 
     await monthInput.fill(String(meses));
