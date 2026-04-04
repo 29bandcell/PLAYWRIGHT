@@ -1,83 +1,128 @@
 import express from 'express';
-import dotenv from 'dotenv';
-import fs from 'fs';
 import { chromium } from 'playwright';
-
-dotenv.config();
+import fs from 'fs';
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY || '';
-const LOGIN_URL = process.env.LOGIN_URL || '';
+const API_KEY = process.env.API_KEY;
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'playwright-api',
-    timestamp: new Date().toISOString()
+// helper
+function checkAuth(req, res) {
+  if (req.headers['x-api-key'] !== API_KEY) {
+    res.status(401).json({ error: 'Não autorizado' });
+    return false;
+  }
+  return true;
+}
+
+// abrir navegador com sessão
+async function startBrowser() {
+  if (!fs.existsSync('session.json')) {
+    throw new Error('session.json não encontrado');
+  }
+
+  return await chromium.launchPersistentContext('', {
+    headless: true,
+    storageState: 'session.json'
   });
-});
+}
 
-app.post('/run', async (req, res) => {
+//////////////////////////////////////////////////////
+// 🚀 GERAR TESTE
+//////////////////////////////////////////////////////
+app.post('/gerar-teste', async (req, res) => {
+  if (!checkAuth(req, res)) return;
+
+  let context;
+
   try {
-    const authHeader = req.headers['x-api-key'];
-
-    if (!API_KEY) {
-      return res.status(500).json({
-        success: false,
-        message: 'API_KEY não configurada'
-      });
-    }
-
-    if (authHeader !== API_KEY) {
-      return res.status(401).json({
-        success: false,
-        message: 'API key inválida'
-      });
-    }
-
-    if (!fs.existsSync('session.json')) {
-      return res.status(400).json({
-        success: false,
-        message: 'session.json não encontrado'
-      });
-    }
-
-    const browser = await chromium.launch({
-      headless: true
-    });
-
-    const context = await browser.newContext({
-      storageState: 'session.json'
-    });
-
+    context = await startBrowser();
     const page = await context.newPage();
 
-    if (LOGIN_URL) {
-      await page.goto(LOGIN_URL, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60000
-      });
-    }
+    await page.goto('https://dashboardcloud.net/iptv/clients');
 
-    await browser.close();
+    // clicar em criar teste
+    await page.click('text=Criar Teste');
+
+    // esperar modal aparecer
+    await page.waitForSelector('text=Dados do teste');
+
+    const texto = await page.locator('textarea').innerText();
+
+    await context.close();
 
     return res.json({
       success: true,
-      message: 'Automação executada com sucesso',
-      data: req.body || {}
+      dados_brutos: texto
     });
-  } catch (error) {
-    return res.status(500).json({
+
+  } catch (err) {
+    if (context) await context.close();
+    return res.json({
       success: false,
-      message: 'Erro ao executar automação',
-      error: error.message
+      error: err.message
     });
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Rodando na porta ${PORT}`);
+//////////////////////////////////////////////////////
+// 🔄 RENOVAR CLIENTE
+//////////////////////////////////////////////////////
+app.post('/renovar', async (req, res) => {
+  if (!checkAuth(req, res)) return;
+
+  const { usuario, meses = 1 } = req.body;
+
+  let context;
+
+  try {
+    context = await startBrowser();
+    const page = await context.newPage();
+
+    await page.goto('https://dashboardcloud.net/iptv/clients');
+
+    // buscar cliente
+    await page.fill('input[type="search"]', usuario);
+
+    await page.waitForTimeout(2000);
+
+    // clicar botão renovar (ajustar seletor se precisar)
+    await page.click('button:has-text("Renovar")');
+
+    // preencher meses
+    await page.fill('input[type="number"]', String(meses));
+
+    // confirmar
+    await page.click('button:has-text("Confirmar")');
+
+    await context.close();
+
+    return res.json({
+      success: true,
+      usuario,
+      meses
+    });
+
+  } catch (err) {
+    if (context) await context.close();
+    return res.json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+//////////////////////////////////////////////////////
+// TESTE
+//////////////////////////////////////////////////////
+app.post('/run', async (req, res) => {
+  return res.json({
+    success: true,
+    message: "API funcionando"
+  });
+});
+
+app.listen(3001, () => {
+  console.log('Rodando na porta 3001');
 });
