@@ -68,6 +68,13 @@ async function ensureLoggedIn(page) {
   }
 }
 
+app.post('/run', async (req, res) => {
+  return res.json({
+    success: true,
+    message: 'API funcionando'
+  });
+});
+
 app.post('/renovar', async (req, res) => {
   if (!checkAuth(req, res)) return;
 
@@ -93,28 +100,64 @@ app.post('/renovar', async (req, res) => {
     await ensureLoggedIn(page);
 
     await page.goto('https://dashboardcloud.net/iptv/clients', {
-      waitUntil: 'domcontentloaded'
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
     });
 
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
 
     const search = page.locator('input[type="search"]').first();
+    const searchExists = await search.count();
 
-    if (await search.count()) {
+    if (searchExists) {
       await search.fill(usuario);
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
     }
+
+    const urlAtual = page.url();
+    const textoPagina = await page.locator('body').innerText().catch(() => '');
+    const totalLinhas = await page.locator('tr').count();
+    const encontrouTextoNaPagina = textoPagina.toLowerCase().includes(String(usuario).toLowerCase());
 
     const linha = page.locator(`tr:has-text("${usuario}")`).first();
 
     if (!(await linha.count())) {
-      throw new Error('Cliente não encontrado');
+      await context.close();
+      await browser.close();
+
+      return res.status(404).json({
+        success: false,
+        message: 'Erro ao renovar',
+        error: 'Cliente não encontrado',
+        debug: {
+          usuarioBuscado: usuario,
+          meses,
+          urlAtual,
+          searchExists: Boolean(searchExists),
+          totalLinhas,
+          encontrouTextoNaPagina,
+          trechoPagina: textoPagina.slice(0, 2500)
+        }
+      });
     }
 
     const btn = linha.locator('button:has-text("Renovar"), a:has-text("Renovar")').first();
 
     if (!(await btn.count())) {
-      throw new Error('Botão renovar não encontrado');
+      await context.close();
+      await browser.close();
+
+      return res.status(404).json({
+        success: false,
+        message: 'Erro ao renovar',
+        error: 'Botão renovar não encontrado',
+        debug: {
+          usuarioBuscado: usuario,
+          urlAtual,
+          totalLinhas,
+          encontrouTextoNaPagina
+        }
+      });
     }
 
     await btn.click();
@@ -125,7 +168,18 @@ app.post('/renovar', async (req, res) => {
     const confirmar = page.locator('button:has-text("Confirmar"), button:has-text("Salvar"), button:has-text("Renovar")').first();
 
     if (!(await confirmar.count())) {
-      throw new Error('Botão confirmar não encontrado');
+      await context.close();
+      await browser.close();
+
+      return res.status(404).json({
+        success: false,
+        message: 'Erro ao renovar',
+        error: 'Botão confirmar não encontrado',
+        debug: {
+          usuarioBuscado: usuario,
+          urlAtual
+        }
+      });
     }
 
     await confirmar.click();
@@ -155,13 +209,6 @@ app.post('/renovar', async (req, res) => {
       error: error.message
     });
   }
-});
-
-app.post('/run', async (req, res) => {
-  return res.json({
-    success: true,
-    message: 'API funcionando'
-  });
 });
 
 app.listen(3001, () => {
