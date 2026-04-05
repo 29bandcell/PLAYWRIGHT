@@ -78,7 +78,7 @@ app.post('/run', async (req, res) => {
 app.post('/renovar', async (req, res) => {
   if (!checkAuth(req, res)) return;
 
-  const { usuario } = req.body;
+  const { usuario } = req.body || {};
   const meses = Number(req.body?.meses || 1);
 
   if (!usuario) {
@@ -141,7 +141,15 @@ app.post('/renovar', async (req, res) => {
       });
     }
 
-    const btn = linha.locator('button:has-text("Renovar"), a:has-text("Renovar")').first();
+    let btn = linha.locator('button:has-text("Renovar"), a:has-text("Renovar")').first();
+
+    if (!(await btn.count())) {
+      btn = linha.locator('[title*="Renovar"], [aria-label*="Renovar"], [data-original-title*="Renovar"]').first();
+    }
+
+    if (!(await btn.count())) {
+      btn = linha.locator('button, a').last();
+    }
 
     if (!(await btn.count())) {
       await context.close();
@@ -155,7 +163,8 @@ app.post('/renovar', async (req, res) => {
           usuarioBuscado: usuario,
           urlAtual,
           totalLinhas,
-          encontrouTextoNaPagina
+          encontrouTextoNaPagina,
+          trechoPagina: textoPagina.slice(0, 2500)
         }
       });
     }
@@ -177,7 +186,10 @@ app.post('/renovar', async (req, res) => {
         error: 'Botão confirmar não encontrado',
         debug: {
           usuarioBuscado: usuario,
-          urlAtual
+          urlAtual,
+          totalLinhas,
+          encontrouTextoNaPagina,
+          trechoPagina: textoPagina.slice(0, 2500)
         }
       });
     }
