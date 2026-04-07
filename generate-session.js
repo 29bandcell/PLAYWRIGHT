@@ -1,20 +1,34 @@
 import { chromium } from 'playwright';
 import dotenv from 'dotenv';
+import readline from 'readline';
 
 dotenv.config();
 
 const LOGIN_URL = process.env.LOGIN_URL;
-const LOGIN_USER = process.env.LOGIN_USER;
-const LOGIN_PASS = process.env.LOGIN_PASS;
 
-if (!LOGIN_URL || !LOGIN_USER || !LOGIN_PASS) {
-  console.error('Faltam variáveis no .env: LOGIN_URL, LOGIN_USER, LOGIN_PASS');
+if (!LOGIN_URL) {
+  console.error('Falta LOGIN_URL no .env');
   process.exit(1);
+}
+
+function waitForEnter(message) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(message, () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
 
 (async () => {
   const browser = await chromium.launch({
-    headless: false
+    headless: false,
+    slowMo: 200
   });
 
   const context = await browser.newContext();
@@ -27,22 +41,54 @@ if (!LOGIN_URL || !LOGIN_USER || !LOGIN_PASS) {
       timeout: 60000
     });
 
-    console.log('Preenchendo login...');
-    await page.fill('input[name="username"], input[name="email"], input[type="text"]', LOGIN_USER);
-    await page.fill('input[name="password"], input[type="password"]', LOGIN_PASS);
+    console.log('\n=== LOGIN ASSISTIDO ===');
+    console.log('1) Faça o login manualmente no navegador');
+    console.log('2) Resolva o CAPTCHA manualmente');
+    console.log('3) Espere entrar na área logada');
+    console.log('4) Volte aqui no terminal e pressione ENTER\n');
 
-    console.log('Enviando login...');
-    await Promise.all([
-      page.waitForLoadState('networkidle'),
-      page.click('button[type="submit"], input[type="submit"], button:has-text("Login"), button:has-text("Entrar")')
-    ]);
+    await waitForEnter('Quando estiver logado, pressione ENTER para continuar... ');
 
-    console.log('Salvando sessão...');
+    console.log('Verificando se o login realmente concluiu...');
+
+    // Espera a navegação estabilizar
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(5000);
+
+    const currentUrl = page.url();
+    const title = await page.title();
+
+    console.log(`URL atual: ${currentUrl}`);
+    console.log(`Título atual: ${title}`);
+
+    // Heurísticas simples para detectar se ainda está na tela de login
+    const pageText = await page.locator('body').innerText().catch(() => '');
+    const stillOnLogin =
+      /login|entrar|sign in|não sou robô|recaptcha|senha/i.test(pageText) &&
+      /login|entrar|sign in/i.test(currentUrl);
+
+    if (stillOnLogin) {
+      console.error('❌ Parece que você ainda está na tela de login. Sessão não foi salva.');
+      await browser.close();
+      process.exit(1);
+    }
+
+    console.log('Confirmando presença de cookies/sessão...');
+    const cookies = await context.cookies();
+
+    if (!cookies || cookies.length === 0) {
+      console.error('❌ Nenhum cookie encontrado. Sessão não foi salva.');
+      await browser.close();
+      process.exit(1);
+    }
+
     await context.storageState({ path: 'session.json' });
 
     console.log('✅ session.json gerado com sucesso!');
+    console.log(`✅ Total de cookies salvos: ${cookies.length}`);
   } catch (error) {
     console.error('❌ Erro ao gerar session.json:', error.message);
+    process.exit(1);
   } finally {
     await browser.close();
   }
