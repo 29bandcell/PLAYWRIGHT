@@ -1,228 +1,112 @@
-import express from 'express';
-import { chromium } from 'playwright';
-import fs from 'fs';
+kimport express from "express";
+import cors from "cors";
+import fs from "fs";
+import path from "path";
+import { chromium } from "playwright";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
-const API_KEY = process.env.API_KEY || '';
-const BASE_URL = 'https://dashboardcloud.net/';
+const PORT = process.env.PORT || 3000;
+const BASE_URL = "https://dashboardcloud.net";
+const API_KEY = process.env.API_KEY;
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'playwright-api',
-    timestamp: new Date().toISOString()
-  });
-});
-
-function checkAuth(req, res) {
-  const key = req.headers['x-api-key'];
-
-  if (!API_KEY || key !== API_KEY) {
-    res.status(401).json({
-      success: false,
-      message: 'API key inválida'
-    });
-    return false;
+function auth(req, res, next) {
+  const key = req.headers["x-api-key"];
+  if (!key || key !== API_KEY) {
+    return res.status(401).json({ error: "API KEY inválida" });
   }
-
-  return true;
+  next();
 }
 
-function getSessionPath() {
-  if (fs.existsSync('/app/session.json')) return '/app/session.json';
-  if (fs.existsSync('session.json')) return 'session.json';
-  throw new Error('session.json não encontrado');
-}
-
-async function startBrowser() {
-  const sessionPath = getSessionPath();
-
-  const browser = await chromium.launch({
-    headless: true
-  });
-
+async function browserSession() {
+  const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
-    storageState: sessionPath
+    storageState: "./session.json"
   });
-
   const page = await context.newPage();
-
   return { browser, context, page };
 }
 
-async function ensureLoggedIn(page) {
-  await page.goto(BASE_URL, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60000
-  });
-
-  await page.waitForTimeout(3000);
-
-  const url = page.url();
-  const body = await page.locator('body').innerText().catch(() => '');
-
-  if (/login|entrar|senha|recaptcha/i.test(body) && /login|auth/i.test(url)) {
-    throw new Error('Sessão expirada');
-  }
-}
-
-app.post('/run', async (req, res) => {
-  return res.json({
-    success: true,
-    message: 'API funcionando'
-  });
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
-app.post('/renovar', async (req, res) => {
-  if (!checkAuth(req, res)) return;
-
-  const { usuario } = req.body || {};
-  const meses = Number(req.body?.meses || 1);
-
-  if (!usuario) {
-    return res.status(400).json({
-      success: false,
-      message: 'usuario obrigatório'
-    });
-  }
-
-  let browser;
-  let context;
+app.post("/listar-clientes", auth, async (req, res) => {
+  let browser, context, page;
 
   try {
-    const started = await startBrowser();
-    browser = started.browser;
-    context = started.context;
-    const page = started.page;
+    ({ browser, context, page } = await browserSession());
 
-    await ensureLoggedIn(page);
-
-    await page.goto('https://dashboardcloud.net/iptv/clients', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000
-    });
-
-    await page.waitForTimeout(4000);
-
-    const search = page.locator('input[type="search"]').first();
-    const searchExists = await search.count();
-
-    if (searchExists) {
-      await search.fill(usuario);
-      await page.waitForTimeout(3000);
-    }
-
-    const urlAtual = page.url();
-    const textoPagina = await page.locator('body').innerText().catch(() => '');
-    const totalLinhas = await page.locator('tr').count();
-    const encontrouTextoNaPagina = textoPagina.toLowerCase().includes(String(usuario).toLowerCase());
-
-    const linha = page.locator(`tr:has-text("${usuario}")`).first();
-
-    if (!(await linha.count())) {
-      await context.close();
-      await browser.close();
-
-      return res.status(404).json({
-        success: false,
-        message: 'Erro ao renovar',
-        error: 'Cliente não encontrado',
-        debug: {
-          usuarioBuscado: usuario,
-          meses,
-          urlAtual,
-          searchExists: Boolean(searchExists),
-          totalLinhas,
-          encontrouTextoNaPagina,
-          trechoPagina: textoPagina.slice(0, 2500)
-        }
-      });
-    }
-
-    let btn = linha.locator('button:has-text("Renovar"), a:has-text("Renovar")').first();
-
-    if (!(await btn.count())) {
-      btn = linha.locator('[title*="Renovar"], [aria-label*="Renovar"], [data-original-title*="Renovar"]').first();
-    }
-
-    if (!(await btn.count())) {
-      btn = linha.locator('button, a').last();
-    }
-
-    if (!(await btn.count())) {
-      await context.close();
-      await browser.close();
-
-      return res.status(404).json({
-        success: false,
-        message: 'Erro ao renovar',
-        error: 'Botão renovar não encontrado',
-        debug: {
-          usuarioBuscado: usuario,
-          urlAtual,
-          totalLinhas,
-          encontrouTextoNaPagina,
-          trechoPagina: textoPagina.slice(0, 2500)
-        }
-      });
-    }
-
-    await btn.click();
-    await page.waitForTimeout(1500);
-
-    await page.waitForTimeout(1000);
-
-    const confirmar = page.locator('button:has-text("Confirmar"), button:has-text("Salvar"), button:has-text("Renovar")').first();
-
-    if (!(await confirmar.count())) {
-      await context.close();
-      await browser.close();
-
-      return res.status(404).json({
-        success: false,
-        message: 'Erro ao renovar',
-        error: 'Botão confirmar não encontrado',
-        debug: {
-          usuarioBuscado: usuario,
-          urlAtual,
-          totalLinhas,
-          encontrouTextoNaPagina,
-          trechoPagina: textoPagina.slice(0, 2500)
-        }
-      });
-    }
-
-    await confirmar.click();
+    await page.goto(`${BASE_URL}/iptv/clients`);
     await page.waitForTimeout(3000);
 
-    await context.close();
-    await browser.close();
+    const clientes = await page.evaluate(() => {
+      const rows = document.querySelectorAll("table tbody tr");
 
-    return res.json({
+      return Array.from(rows).map(row => {
+        const cells = row.querySelectorAll("td");
+
+        return {
+          nome: cells[1]?.innerText.trim(),
+          usuario: cells[2]?.innerText.trim(),
+          vencimento: cells[6]?.innerText.trim(),
+          status: cells[9]?.innerText.trim()
+        };
+      });
+    });
+
+    res.json({
       success: true,
-      message: 'Cliente renovado',
-      usuario,
-      meses
+      total: clientes.length,
+      clientes
     });
-  } catch (error) {
-    try {
-      if (context) await context.close();
-    } catch {}
 
-    try {
-      if (browser) await browser.close();
-    } catch {}
-
-    return res.status(500).json({
-      success: false,
-      message: 'Erro ao renovar',
-      error: error.message
-    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    await page?.close();
+    await context?.close();
+    await browser?.close();
   }
 });
 
-app.listen(3001, () => {
-  console.log('Servidor rodando na porta 3001');
+app.post("/renovar", auth, async (req, res) => {
+  const { usuario } = req.body;
+
+  if (!usuario) {
+    return res.status(400).json({ error: "usuario obrigatório" });
+  }
+
+  let browser, context, page;
+
+  try {
+    ({ browser, context, page } = await browserSession());
+
+    await page.goto(`${BASE_URL}/iptv/clients`);
+    await page.waitForTimeout(3000);
+
+    await page.fill("input[type=search]", usuario);
+    await page.waitForTimeout(2000);
+
+    const btn = await page.$("button.btn-success");
+    if (btn) {
+      await btn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    res.json({ success: true, usuario });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    await page?.close();
+    await context?.close();
+    await browser?.close();
+  }
+});
+
+app.listen(PORT, () => {
+  console.log("API rodando na porta", PORT);
 });
